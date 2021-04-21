@@ -21,6 +21,11 @@ module global_variables
   real(8),allocatable :: Act(:,:) 
   real(8) :: E0, omega0, Tpulse0
 
+! MPI
+  include 'mpif.h'
+  integer :: Myrank,Nprocs,ierr
+  real(8) :: Time_start,Time_now
+  integer :: nk_s, nk_e, nk_average, nk_remainder
 
 end module global_variables
 !---------------------------------------------------------------
@@ -28,12 +33,19 @@ program main
   use global_variables
   implicit none
 
+  call MPI_init(ierr)
+  call MPI_COMM_SIZE(MPI_COMM_WORLD,nprocs,ierr)
+  call MPI_COMM_RANK(MPI_COMM_WORLD,myrank,ierr)
+  Time_start=MPI_WTIME()
+
   call input_variables
   call initialize
 
   call calc_ground_state
   call time_propagation
 
+
+  call MPI_finalize(ierr)
   
 end program main
 !---------------------------------------------------------------
@@ -47,8 +59,8 @@ subroutine input_variables
   t0_hop = -2.64d0/27.2114d0
 
 ! number of grid points
-  nk1 = 8
-  nk2 = 8
+  nk1 = 32
+  nk2 = 32
 
 ! lattice constant
   a_lattice = 2.5d0/0.5291772d0 !! 2.5 AA
@@ -91,8 +103,22 @@ subroutine initialize
 
   nk = nk1*nk2
 
+
+  nk_average = nk/nprocs
+  nk_remainder = mod(nk,nprocs)
+  if(nk < nprocs)call error_finalize('Error: nk < # of MPI processes')
+  if(myrank+1 <= nk_remainder)then
+    nk_s = 1 + myrank*(nk_average+1)
+    nk_e = nk_s + (nk_average + 1) -1
+  else
+    nk_s = 1 + nk_remainder*(nk_average+1) + nk_average*(myrank-nk_remainder)
+    nk_e = nk_s + nk_average -1
+  end if
+
+!  write(*,*)myrank,nk_s,nk_e
+
   allocate(kx0(nk),ky0(nk),kxt(nk),kyt(nk))
-  allocate(zpsi(2,nk),eps_bk(2,nk))
+  allocate(zpsi(2,nk_s:nk_e),eps_bk(2,nk))
 
   volume = (a_vec(1,1)*a_vec(2,2)-a_vec(2,1)*a_vec(1,2))*1d0
   
@@ -102,8 +128,10 @@ subroutine initialize
   b_vec(1,2) = 2d0*pi*(-1d0*a_vec(2,1))/volume
   b_vec(2,2) = 2d0*pi*(1d0*a_vec(1,1))/volume
 
-  write(*,*)sum(a_vec(:,1)*b_vec(:,1))/(2d0*pi),sum(a_vec(:,1)*b_vec(:,2))/(2d0*pi)
-  write(*,*)sum(a_vec(:,2)*b_vec(:,1))/(2d0*pi),sum(a_vec(:,2)*b_vec(:,2))/(2d0*pi)
+  if(myrank == 0)then
+    write(*,*)sum(a_vec(:,1)*b_vec(:,1))/(2d0*pi),sum(a_vec(:,1)*b_vec(:,2))/(2d0*pi)
+    write(*,*)sum(a_vec(:,2)*b_vec(:,1))/(2d0*pi),sum(a_vec(:,2)*b_vec(:,2))/(2d0*pi)
+  end if
 
   ik = 0
   do ik1 = 0, nk1-1
@@ -124,10 +152,11 @@ subroutine calc_ground_state
   implicit none
   integer :: ik, ik1, ik2
   complex(8) :: zham(2,2), zvec(2,2), zfk
-  real(8) :: eps_t(2)
+  real(8) :: eps_t(2), eps_bk_l(2,nk)
   real(8) :: kx_t, ky_t
 
-  do ik = 1, nk
+  eps_bk_l = 0d0
+  do ik = nk_s, nk_e
     
     kx_t = kx0(ik)
     ky_t = ky0(ik)
@@ -143,20 +172,24 @@ subroutine calc_ground_state
 
     call calc_eig_vec_2x2(zham, zvec, eps_t)
     zpsi(:,ik) = zvec(:,1)
-    eps_bk(:,ik) = eps_t(:)
+    eps_bk_l(:,ik) = eps_t(:)
     
   end do
 
-  open(20,file='band_map.out')
-  ik = 0
-  do ik1 = 0, nk1-1
-    do ik2 = 0, nk2-1
-      ik=ik+1
-      write(20,"(999e26.16e3)")kx0(ik),ky0(ik),eps_bk(1:2,ik)
+  call MPI_Allreduce(eps_bk_l, eps_bk, 2*nk, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_WORLD, ierr)
+
+  if(myrank == 0)then
+    open(20,file='band_map.out')
+    ik = 0
+    do ik1 = 0, nk1-1
+      do ik2 = 0, nk2-1
+        ik=ik+1
+        write(20,"(999e26.16e3)")kx0(ik),ky0(ik),eps_bk(1:2,ik)
+      end do
+      write(20,*)
     end do
-    write(20,*)
-  end do
-  close(20)
+    close(20)
+  end if
 
 end subroutine calc_ground_state
 !---------------------------------------------------------------  
@@ -215,8 +248,9 @@ subroutine time_propagation
   allocate(pop_dist(nk,2))
 
   call init_laser
-  open(20,file='total_energy.out')
-  open(21,file='current.out')
+  
+  if(myrank == 0) open(20,file='total_energy.out')
+  if(myrank == 0) open(21,file='current.out')
 
   do it = 0, nt
 ! |zpsi(t+dt)> = exp(-zi*dt*H(t+dt/2)) |zpsi(t)>
@@ -232,24 +266,26 @@ subroutine time_propagation
     kyt(:) = ky0(:) + Act_t(2)
     call calc_current(jt)
     call calc_energy(Etot)
-    write(20,"(2e26.16e3)")dt*it,Etot
-    write(21,"(999e26.16e3)")dt*it,jt(:)
+    if(myrank == 0) write(20,"(2e26.16e3)")dt*it,Etot
+    if(myrank == 0) write(21,"(999e26.16e3)")dt*it,jt(:)
 
   end do
-  close(20)
-  close(21)
+  if(myrank == 0) close(20)
+  if(myrank == 0) close(21)
 
   call calc_pop_dist(pop_dist)
-  open(22,file='pop_dist_final.out')
-  ik = 0
-  do ik1 = 0, nk1-1
-    do ik2 = 0, nk2-1
-      ik=ik+1
-      write(22,"(999e26.16e3)")kxt(ik),kyt(ik),pop_dist(ik,1:2)
+  if(myrank == 0)then
+    open(22,file='pop_dist_final.out')
+    ik = 0
+    do ik1 = 0, nk1-1
+      do ik2 = 0, nk2-1
+        ik=ik+1
+        write(22,"(999e26.16e3)")kxt(ik),kyt(ik),pop_dist(ik,1:2)
+      end do
+      write(22,*)
     end do
-    write(22,*)
-  end do
-  close(22)
+    close(22)
+  end if
 
 
 end subroutine time_propagation
@@ -275,12 +311,14 @@ subroutine init_laser
 
   end do
 
-  open(20,file='laser.out')
-  do it = 0, nt
-    tt = dt*it
-    write(20,"(999e26.16)")tt,Act(:,it)
-  end do
-  close(20)
+  if(myrank == 0)then
+    open(20,file='laser.out')
+    do it = 0, nt
+      tt = dt*it
+      write(20,"(999e26.16)")tt,Act(:,it)
+    end do
+    close(20)
+  end if
 
 end subroutine init_laser
 !---------------------------------------------------------------  
@@ -295,7 +333,7 @@ subroutine dt_evolve
   
 
 
-  do ik = 1, nk
+  do ik = nk_s, nk_e
 
     kx_t = kxt(ik)
     ky_t = kyt(ik)
@@ -335,12 +373,13 @@ subroutine calc_energy(Etot)
   use global_variables
   implicit none
   real(8),intent(out) :: Etot
+  real(8) :: Etot_l
   complex(8) :: zham(2,2), zfk, zvec(2), zhvec(2)
   real(8) :: kx_t, ky_t
   integer :: ik
 
-  Etot = 0d0
-  do ik = 1, nk
+  Etot_l = 0d0
+  do ik = nk_s, nk_e
 
     kx_t = kxt(ik)
     ky_t = kyt(ik)
@@ -358,11 +397,12 @@ subroutine calc_energy(Etot)
     zhvec(:) = matmul(zham,zvec)
 
 !Etot = Etot + <zpsi|H|zpsi>
-    Etot = Etot + sum(conjg(zpsi(1:2,ik))*zhvec(1:2))
+    Etot_l = Etot_l + sum(conjg(zpsi(1:2,ik))*zhvec(1:2))
 !    Etot = Etot + sum(abs(zpsi(1:2,ik))**2)
 
   end do
-  Etot = Etot/nk
+  Etot_l = Etot_l/nk
+  call MPI_Allreduce(Etot_l, Etot, 1, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_WORLD, ierr)  
 
 end subroutine calc_energy
 !---------------------------------------------------------------  
@@ -370,13 +410,14 @@ subroutine calc_current(jt)
   use global_variables
   implicit  none
   real(8),intent(out) :: jt(2)
+  real(8) :: jt_l(2)
   complex(8) :: zJop_x(2,2),zJop_y(2,2), zfk, zvec(2)
   complex(8) :: zJvec_x(2),zJvec_y(2)
   real(8) :: kx_t, ky_t
   integer :: ik
 
-  jt = 0d0
-  do ik = 1, nk
+  jt_l = 0d0
+  do ik = nk_s, nk_e
 
     kx_t = kxt(ik)
     ky_t = kyt(ik)
@@ -405,12 +446,13 @@ subroutine calc_current(jt)
     zJvec_x = matmul(zJop_x,zvec)
     zJvec_y = matmul(zJop_y,zvec)
 
-    jt(1) = jt(1) + sum(conjg(zpsi(:,ik))*zJvec_x(:))
-    jt(2) = jt(2) + sum(conjg(zpsi(:,ik))*zJvec_y(:))
+    jt_l(1) = jt_l(1) + sum(conjg(zpsi(:,ik))*zJvec_x(:))
+    jt_l(2) = jt_l(2) + sum(conjg(zpsi(:,ik))*zJvec_y(:))
 
   end do
 
-  jt = jt/nk
+  jt_l = jt_l/nk
+  call MPI_Allreduce(jt_l, jt, 2, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_WORLD, ierr)
 
 end subroutine calc_current
 !---------------------------------------------------------------  
@@ -418,12 +460,14 @@ subroutine calc_pop_dist(pop_dist)
   use global_variables
   implicit none
   real(8),intent(out):: pop_dist(nk,2)
+  real(8) :: pop_dist_l(nk,2)
   complex(8) :: zham(2,2), zfk, zvec(2), zphi(2,2)
   real(8) :: eps_t(2)
   real(8) :: kx_t, ky_t
   integer :: ik
 
-  do ik = 1, nk
+  pop_dist_l = 0d0
+  do ik = nk_s, nk_e
 
     kx_t = kxt(ik)
     ky_t = kyt(ik)
@@ -439,9 +483,22 @@ subroutine calc_pop_dist(pop_dist)
 
     call calc_eig_vec_2x2(zham, zphi, eps_t)
 
-    pop_dist(ik,1) = abs(sum(conjg(zphi(:,1))*zpsi(:,ik)) )**2
-    pop_dist(ik,2) = abs(sum(conjg(zphi(:,2))*zpsi(:,ik)) )**2
+    pop_dist_l(ik,1) = abs(sum(conjg(zphi(:,1))*zpsi(:,ik)) )**2
+    pop_dist_l(ik,2) = abs(sum(conjg(zphi(:,2))*zpsi(:,ik)) )**2
 
   end do
 
+  call MPI_Allreduce(pop_dist_l, pop_dist, 2*nk, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_WORLD, ierr)
+
 end subroutine calc_pop_dist
+!-------------------------------------------------------------
+subroutine error_finalize(message_t)
+  use global_variables
+  implicit none
+  character(*),intent(in) :: message_t
+
+  if(myrank==0)write(*,"(A)")trim(message_t)
+  call MPI_Finalize(ierr)
+  stop
+
+end subroutine error_finalize
