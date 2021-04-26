@@ -54,16 +54,16 @@ subroutine input_variables
   implicit none
 
 ! physical parameters
-  eps_b = 0.5d0*5.9d0/27.2114d0
-  eps_n = -0.5d0*5.9d0/27.2114d0
-  t0_hop = -2.64d0/27.2114d0
+  eps_b = 3.34d0/27.2114d0
+  eps_n = -2.56d0/27.2114d0
+  t0_hop = 2.64d0/27.2114d0
 
 ! number of grid points
   nk1 = 32
   nk2 = 32
 
 ! lattice constant
-  a_lattice = 2.5d0/0.5291772d0 !! 2.5 AA
+  a_lattice=2.456d0/0.5291772d0  !!2.5AA
 
 ! lattice vectors
   a_vec(1,1) = a_lattice*sqrt(3d0)/2d0
