@@ -84,13 +84,13 @@ subroutine input_variables
 
 
 ! time propagation
-  Tprop = 10d0/0.024189d0
+  Tprop = 210d0/0.024189d0
   dt = 0.02d0
   nt = aint(Tprop/dt) + 1
 
   E0       = 0.012d0
   omega0   = 0.95d0/27.2114d0  !ev
-  Tpulse0  = 10d0/0.024189d0   !fs
+  Tpulse0  = 200d0/0.024189d0   !fs
 
 
 end subroutine input_variables
