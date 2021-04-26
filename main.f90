@@ -216,7 +216,7 @@ subroutine calc_eig_vec_2x2(zham, zvec, eps_t)
     zvec(1,1) = 1d0/sqrt(1d0+abs(zy)**2)
     zvec(2,1) = zy/sqrt(1d0+abs(zy)**2)
 
-    zx = zb/(eps_t(2)-c)
+    zx = zb/(eps_t(2)-a)
     zvec(1,2) = zx/sqrt(1d0+abs(zx)**2)
     zvec(2,2) = 1d0/sqrt(1d0+abs(zx)**2)
 
