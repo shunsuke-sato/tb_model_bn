@@ -22,6 +22,11 @@ module global_variables
   real(8),allocatable :: Act(:,:) 
   real(8) :: E0, omega0, Tpulse0
 
+! Floquet calculation
+  integer,parameter :: nmax_floquet = 64
+  integer,parameter :: ndim_F = 2*(2*nmax_floquet+1)
+  complex(8) :: zham_floquet(2,2,-2*nmax_floquet:2*nmax_floquet)
+
 end module global_variables
 !---------------------------------------------------------------
 program main
@@ -32,6 +37,7 @@ program main
   call initialize
 
   call calc_ground_state
+  call calc_floquet_state
 
 end program main
 !---------------------------------------------------------------
@@ -47,7 +53,7 @@ subroutine input_variables
 ! number of grid points
   nsym = 4
   allocate(nk_sym(nsym-1))
-  nk_sym = 12
+  nk_sym = 36
   nk = sum(nk_sym)
 
 
@@ -73,11 +79,12 @@ subroutine input_variables
 
 
 ! time propagation
-  omega0   = 0.95d0/27.2114d0  !ev
+  omega0   = 0.5d0/27.2114d0  !ev
   Tperiod  = 2d0*pi/omega0
-  nt = 32
+  nt = 512
   dt = Tperiod/nt
 
+  E0 = 0.000000d0
 
 end subroutine input_variables
 !---------------------------------------------------------------
@@ -249,24 +256,25 @@ subroutine init_laser
   implicit none
   integer :: it
   real(8) :: tt, xx
+  real(8) :: Epdir(2), ss
 
+! Gamma-K direction
+  Epdir(1) = 2d0/3d0*b_vec(1,1) + 1d0/3d0*b_vec(1,2)
+  Epdir(2) = 2d0/3d0*b_vec(2,1) + 1d0/3d0*b_vec(2,2)
+  ss = sqrt(sum((Epdir)**2))
+  Epdir = Epdir/ss
 
-  allocate(Act(2,-1:nt+1))
+  allocate(Act(2,0:nt-1))
   Act = 0d0
 
-  do it = 0, nt
+  do it = 0, nt-1
     tt = dt*it
-    xx = tt -0.5d0*Tpulse0
-
-    if(abs(xx)<= 0.5d0*Tpulse0)then
-      Act(1,it) = - E0/omega0*cos(omega0*xx)*cos(pi*xx/Tpulse0)**4
-      Act(2,it) = - E0/omega0*sin(omega0*xx)*cos(pi*xx/Tpulse0)**4
-    end if
-
+    Act(1,it) = -Epdir(1)*E0/omega0*cos(omega0*tt)
+    Act(2,it) = -Epdir(1)*E0/omega0*cos(omega0*tt)
   end do
 
   open(20,file='laser.out')
-  do it = 0, nt
+  do it = 0, nt-1
     tt = dt*it
     write(20,"(999e26.16)")tt,Act(:,it)
   end do
@@ -274,8 +282,127 @@ subroutine init_laser
 
 end subroutine init_laser
 !---------------------------------------------------------------
+subroutine calc_floquet_state
+  use global_variables
+  implicit none
+  integer :: ik, ii
+  real(8) :: eps_F(ndim_F), occ_F(ndim_F)
+  call init_laser
+
+  open(40,file='floquet_band.out')
+  do ik = 1, nk
+    
+    call calc_floquet_sub_matrix(ik)
+    call diagonalize_floqet_matrix(eps_F, occ_F)
+
+    write(40,"(999e26.16e3)")kpath(ik),(eps_F(ii), occ_F(ii), ii=1,ndim_F)
+    
+  end do
+  close(40)
+
+end subroutine calc_floquet_state
 !---------------------------------------------------------------
+subroutine calc_floquet_sub_matrix(ik)
+  use global_variables
+  implicit none
+  integer,intent(in) :: ik
+  complex(8) :: zham(2,2), zfk
+  integer :: ii, it
+  real(8) :: kx_t, ky_t
+
+  zham_floquet = 0d0
+
+
+  do ii = -2*nmax_floquet, 2*nmax_floquet
+    
+    do it = 0, nt-1
+      kx_t = kx0(ik) + Act(1,it)
+      ky_t = ky0(ik) + Act(2,it)
+
+      zfk = exp(zi*(kx_t*delta_vec(1,1)+ky_t*delta_vec(2,1))) &
+          + exp(zi*(kx_t*delta_vec(1,2)+ky_t*delta_vec(2,2))) &
+          + exp(zi*(kx_t*delta_vec(1,3)+ky_t*delta_vec(2,3))) 
+
+      zham(1,1) = eps_b
+      zham(1,2) = t0_hop*zfk
+      zham(2,1) = conjg(zham(1,2))
+      zham(2,2) = eps_n
+
+      zham_floquet(:,:,ii) = zham_floquet(:,:,ii) + zham(:,:)*exp(zi*ii*omega0*dt*it)
+    end do
+  end do
+
+  zham_floquet = zham_floquet/nt
+
+!! debug
+!  zham_floquet = 0d0
+!  kx_t = kx0(ik)
+!  ky_t = ky0(ik)
+!
+!  zfk = exp(zi*(kx_t*delta_vec(1,1)+ky_t*delta_vec(2,1))) &
+!      + exp(zi*(kx_t*delta_vec(1,2)+ky_t*delta_vec(2,2))) &
+!      + exp(zi*(kx_t*delta_vec(1,3)+ky_t*delta_vec(2,3))) 
+!
+!  zham(1,1) = eps_b
+!  zham(1,2) = t0_hop*zfk
+!  zham(2,1) = conjg(zham(1,2))
+!  zham(2,2) = eps_n
+!  zham_floquet(:,:,0) = zham
+
+end subroutine calc_floquet_sub_matrix
 !---------------------------------------------------------------
+subroutine diagonalize_floqet_matrix(eps_F,occ_F)
+  use global_variables
+  implicit none
+  real(8),intent(out) :: eps_F(ndim_F), occ_F(ndim_F)
+  complex(8),allocatable :: zham_F(:,:)
+  integer :: idim, jdim, ii
+!==LAPACK
+  integer :: nmax
+  integer :: lwork
+  complex(8),allocatable :: za(:,:),work_lp(:)
+  real(8),allocatable :: rwork(:),w(:)
+  integer :: info
+!==LAPACK
+
+  allocate(zham_F(ndim_F, ndim_F))
+
+!==LAPACK
+  nmax = ndim_F
+  lwork = 6*nmax**2
+  allocate(za(nmax,nmax),work_lp(lwork),rwork(3*nmax-2),w(nmax))
+!==LAPACK
+
+  zham_F = 0d0
+
+  do idim = 1, 2*nmax_floquet + 1
+    do jdim = 1, 2*nmax_floquet + 1
+
+      ii = idim-jdim
+      zham_F(2*(idim-1)+1:2*(idim-1)+2,2*(jdim-1)+1:2*(jdim-1)+2) &
+        = zham_floquet(1:2,1:2,ii)
+    end do
+
+    zham_F(2*(idim-1)+1,2*(idim-1)+1) &
+              = zham_F(2*(idim-1)+1,2*(idim-1)+1) &
+              - omega0*(idim-nmax_floquet -1)
+
+    zham_F(2*(idim-1)+2,2*(idim-1)+2) &
+              = zham_F(2*(idim-1)+2,2*(idim-1)+2) &
+              - omega0*(idim-nmax_floquet -1)
+  end do
+
+  za = zham_F
+  Call zheev('V', 'U', nmax, za, nmax, w, work_lp, lwork, rwork, info)
+
+  eps_F = w
+  idim = ndim_F/2 !2*(nmax_floquet + 1 -1)+1
+!  idim = 2*(nmax_floquet + 1 -1)+1
+  do ii = 1, ndim_F
+    occ_F(ii) = abs(za(idim,ii))**2+abs(za(idim+1,ii))**2
+  end do
+
+end subroutine diagonalize_floqet_matrix
 !---------------------------------------------------------------
 !---------------------------------------------------------------
 !---------------------------------------------------------------
