@@ -23,7 +23,7 @@ module global_variables
   real(8) :: E0, omega0, Tpulse0
 
 ! Floquet calculation
-  integer,parameter :: nmax_floquet = 64
+  integer,parameter :: nmax_floquet = 72
   integer,parameter :: ndim_F = 2*(2*nmax_floquet+1)
   complex(8) :: zham_floquet(2,2,-2*nmax_floquet:2*nmax_floquet)
 
@@ -53,7 +53,7 @@ subroutine input_variables
 ! number of grid points
   nsym = 4
   allocate(nk_sym(nsym-1))
-  nk_sym = 36
+  nk_sym = 64
   nk = sum(nk_sym)
 
 
@@ -79,12 +79,12 @@ subroutine input_variables
 
 
 ! time propagation
-  omega0   = 0.5d0/27.2114d0  !ev
+  omega0   = 0.25d0/27.2114d0  !ev
   Tperiod  = 2d0*pi/omega0
   nt = 512
   dt = Tperiod/nt
 
-  E0 = 0.000000d0
+  E0 = 0.01d0
 
 end subroutine input_variables
 !---------------------------------------------------------------
@@ -270,7 +270,7 @@ subroutine init_laser
   do it = 0, nt-1
     tt = dt*it
     Act(1,it) = -Epdir(1)*E0/omega0*cos(omega0*tt)
-    Act(2,it) = -Epdir(1)*E0/omega0*cos(omega0*tt)
+    Act(2,it) = -Epdir(2)*E0/omega0*cos(omega0*tt)
   end do
 
   open(20,file='laser.out')
