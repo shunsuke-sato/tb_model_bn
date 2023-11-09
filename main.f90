@@ -20,6 +20,7 @@ module global_variables
 ! laser fields
   real(8),allocatable :: Act(:,:) 
   real(8) :: E0, omega0, Tpulse0
+  real(8) :: phi_CEP, theta_CEP
 
 ! MPI
   include 'mpif.h'
@@ -52,6 +53,7 @@ end program main
 subroutine input_variables
   use global_variables
   implicit none
+  real(8) :: tprop_fs, E0_Vpm, omega0_ev, Tpulse_fs, phi_CEP_2pi, theta_CEP_2pi
 
 ! physical parameters
   eps_b = 3.34d0/27.2114d0
@@ -83,15 +85,36 @@ subroutine input_variables
   delta_vec(2,3) = a_lattice*(-0.5d0)
 
 
+
+  if(myrank == 0)then
+    read(*,*)tprop_fs
+    read(*,*)dt
+    read(*,*)E0_Vpm
+    read(*,*)omega0_ev
+    read(*,*)Tpulse_fs
+    read(*,*)phi_CEP_2pi
+    read(*,*)theta_CEP_2pi
+
+  end if
+
+  call mpi_bcast(tprop_fs, 1, MPI_DOUBLE_PRECISION, 0, MPI_COMM_WORLD, ierr)
+  call mpi_bcast(dt, 1, MPI_DOUBLE_PRECISION, 0, MPI_COMM_WORLD, ierr)
+  call mpi_bcast(E0_Vpm, 1, MPI_DOUBLE_PRECISION, 0, MPI_COMM_WORLD, ierr)
+  call mpi_bcast(omega0_ev, 1, MPI_DOUBLE_PRECISION, 0, MPI_COMM_WORLD, ierr)
+  call mpi_bcast(Tpulse_fs, 1, MPI_DOUBLE_PRECISION, 0, MPI_COMM_WORLD, ierr)
+  call mpi_bcast(phi_CEP_2pi, 1, MPI_DOUBLE_PRECISION, 0, MPI_COMM_WORLD, ierr)
+  call mpi_bcast(theta_CEP_2pi, 1, MPI_DOUBLE_PRECISION, 0, MPI_COMM_WORLD, ierr)
+
 ! time propagation
-  Tprop = 210d0/0.024189d0
-  dt = 0.02d0
+  Tprop = tprop_fs/0.024189d0
   nt = aint(Tprop/dt) + 1
 
-  E0       = 0.012d0
-  omega0   = 0.95d0/27.2114d0  !ev
-  Tpulse0  = 200d0/0.024189d0   !fs
+  E0       = E0_Vpm/(27.2114d0/0.529d-10)
+  omega0   = omega0_ev/27.2114d0  !ev
+  Tpulse0  = tpulse_fs/0.024189d0   !fs
 
+  phi_CEP = phi_CEP_2pi*2d0*pi
+  theta_CEP = theta_CEP_2pi*2d0*pi
 
 end subroutine input_variables
 !---------------------------------------------------------------
@@ -305,8 +328,12 @@ subroutine init_laser
     xx = tt -0.5d0*Tpulse0
 
     if(abs(xx)<= 0.5d0*Tpulse0)then
-      Act(1,it) = - E0/omega0*cos(omega0*xx)*cos(pi*xx/Tpulse0)**4
-      Act(2,it) = - E0/omega0*sin(omega0*xx)*cos(pi*xx/Tpulse0)**4
+!      Act(1,it) = - E0/omega0*cos(omega0*xx)*cos(pi*xx/Tpulse0)**4
+!      Act(2,it) = - E0/omega0*sin(omega0*xx)*cos(pi*xx/Tpulse0)**4
+
+      Act(1,it) = - E0/omega0*(&
+          cos(omega0*xx+theta_CEP) + 0.5d0*cos(2d0*omega0*xx+phi_CEP+2d0*theta_CEP) &
+          )*cos(pi*xx/Tpulse0)**4
     end if
 
   end do

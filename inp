@@ -1,0 +1,7 @@
+50d0    ! tprop_fs
+0.2d0   ! dt
+1d6     !E0_Vpm 
+0.5d0   !omega0_ev
+40d0    ! tpulse_fs
+0.25d0  !phi_CEP_2pi
+0d0     !theta_CEP_2pi
