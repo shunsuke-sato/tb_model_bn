@@ -299,6 +299,8 @@ subroutine time_propagation
   call calc_pop_dist(pop_dist)
   if(myrank == 0)then
     open(22,file='pop_dist_final.out')
+    write(22,"(A,2x,2e26.16e3)")"# nex, valence, conduction = " &
+        ,sum(pop_dist(:,1))/nk,sum(pop_dist(:,2))/nk
     ik = 0
     do ik1 = 0, nk1-1
       do ik2 = 0, nk2-1
