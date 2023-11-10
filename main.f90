@@ -60,10 +60,6 @@ subroutine input_variables
   eps_n = -2.56d0/27.2114d0
   t0_hop = 2.64d0/27.2114d0
 
-! number of grid points
-  nk1 = 32
-  nk2 = 32
-
 ! lattice constant
   a_lattice=2.456d0/0.5291772d0  !!2.5AA
 
@@ -87,6 +83,7 @@ subroutine input_variables
 
 
   if(myrank == 0)then
+    read(*,*)nk1, nk2
     read(*,*)tprop_fs
     read(*,*)dt
     read(*,*)E0_Vpm
@@ -97,6 +94,8 @@ subroutine input_variables
 
   end if
 
+  call mpi_bcast(nk1, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
+  call mpi_bcast(nk2, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
   call mpi_bcast(tprop_fs, 1, MPI_DOUBLE_PRECISION, 0, MPI_COMM_WORLD, ierr)
   call mpi_bcast(dt, 1, MPI_DOUBLE_PRECISION, 0, MPI_COMM_WORLD, ierr)
   call mpi_bcast(E0_Vpm, 1, MPI_DOUBLE_PRECISION, 0, MPI_COMM_WORLD, ierr)

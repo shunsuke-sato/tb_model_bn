@@ -1,3 +1,4 @@
+32  32  ! nk1, nk2
 50d0    ! tprop_fs
 0.2d0   ! dt
 1d6     !E0_Vpm 
