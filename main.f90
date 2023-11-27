@@ -319,7 +319,10 @@ subroutine init_laser
   implicit none
   integer :: it
   real(8) :: tt, xx
+  real(8) :: e_p(2)
 
+  e_p(1) = sqrt(3d0)/2d0
+  e_p(2) = 1d0/2d0
 
   allocate(Act(2,-1:nt+1))
   Act = 0d0
@@ -332,8 +335,12 @@ subroutine init_laser
 !      Act(1,it) = - E0/omega0*cos(omega0*xx)*cos(pi*xx/Tpulse0)**4
 !      Act(2,it) = - E0/omega0*sin(omega0*xx)*cos(pi*xx/Tpulse0)**4
 
-      Act(1,it) = - E0/omega0*(&
-          cos(omega0*xx+theta_CEP) + 0.5d0*cos(2d0*omega0*xx+phi_CEP+2d0*theta_CEP) &
+      Act(1,it) = - e_p(1)*E0/omega0*(&
+          cos(omega0*xx+theta_CEP) + 0.25d0*cos(2d0*omega0*xx+phi_CEP+2d0*theta_CEP) &
+          )*cos(pi*xx/Tpulse0)**4
+
+      Act(2,it) = - e_p(2)*E0/omega0*(&
+          cos(omega0*xx+theta_CEP) + 0.25d0*cos(2d0*omega0*xx+phi_CEP+2d0*theta_CEP) &
           )*cos(pi*xx/Tpulse0)**4
     end if
 
